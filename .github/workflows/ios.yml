@@ -1,0 +1,43 @@
+name: Build iOS App
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Install XcodeGen
+      run: brew install xcodegen
+      
+    - name: Generate Project
+      run: xcodegen generate
+      
+    - name: Build App
+      run: |
+        xcodebuild build \
+          -project CognitiveEther.xcodeproj \
+          -scheme CognitiveEther \
+          -sdk iphoneos \
+          -configuration Release \
+          CODE_SIGNING_ALLOWED=NO \
+          CONFIGURATION_BUILD_DIR=build/Release-iphoneos
+          
+    - name: Create IPA
+      run: |
+        mkdir -p build/Payload
+        cp -r build/Release-iphoneos/CognitiveEther.app build/Payload/
+        mkdir -p output
+        cd build && zip -r ../output/CognitiveEther.ipa Payload
+        
+    - name: Upload IPA
+      uses: actions/upload-artifact@v4
+      with:
+        name: CognitiveEther-IPA
+        path: output/CognitiveEther.ipa
