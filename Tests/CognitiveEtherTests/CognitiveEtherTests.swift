@@ -24,4 +24,9 @@ final class CognitiveEtherTests: XCTestCase {
 
         XCTAssertEqual(session.previewText, "Assistant reply")
     }
+
+    func testPromptPresetCatalogIsPopulated() throws {
+        XCTAssertFalse(PromptPreset.catalog.isEmpty)
+        XCTAssertTrue(PromptPreset.catalog.contains(where: { $0.title == "Pragmatic Engineer" }))
+    }
 }

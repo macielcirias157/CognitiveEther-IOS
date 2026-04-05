@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 struct ChatView: View {
     @ObservedObject private var viewModel = ChatViewModel.shared
@@ -196,6 +197,11 @@ struct MessageBubble: View {
                                     lineWidth: 1
                                 )
                         )
+                        .contextMenu {
+                            Button("Copy") {
+                                UIPasteboard.general.string = message.content
+                            }
+                        }
 
                     Text(timestampLabel)
                         .font(theme.appFont(size: 11))

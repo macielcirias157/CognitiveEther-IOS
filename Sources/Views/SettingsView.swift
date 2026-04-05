@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @ObservedObject private var config = ConfigManager.shared
     @ObservedObject private var theme = ThemeManager.shared
+    @ObservedObject private var aiManager = AIManager.shared
 
     @State private var isShowingClearAlert = false
 
@@ -13,6 +14,7 @@ struct SettingsView: View {
                 providerSection
                 requestSection
                 servicesSection
+                diagnosticsSection
                 behaviorSection
                 privacySection
             }
@@ -21,6 +23,9 @@ struct SettingsView: View {
         .background(theme.surface.ignoresSafeArea())
         .navigationTitle("Settings")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await aiManager.refreshAllCatalogs()
+        }
         .alert("Clear chat history?", isPresented: $isShowingClearAlert) {
             Button("Cancel", role: .cancel) {}
             Button("Clear", role: .destructive) {
@@ -37,7 +42,7 @@ struct SettingsView: View {
                 .font(theme.appFont(size: 30, weight: .bold))
                 .foregroundColor(theme.onSurface)
 
-            Text("API keys are stored in Keychain. Non-sensitive preferences stay in local app storage.")
+            Text("API keys are stored in Keychain. Provider diagnostics and model catalogs refresh against the real services.")
                 .font(theme.appFont(size: 14))
                 .foregroundColor(theme.onSurface.opacity(0.6))
         }
@@ -55,10 +60,9 @@ struct SettingsView: View {
                     options: AIProvider.allCases
                 )
 
-                ModelFieldRow(label: "Ollama Model", text: $config.ollamaModelName, helper: "Used when Ollama is the active provider.")
-                ModelFieldRow(label: "OpenAI Model", text: $config.openAIModelName, helper: "Example: gpt-4o")
-                ModelFieldRow(label: "DeepSeek Model", text: $config.deepSeekModelName, helper: "Example: deepseek-chat")
-                ModelFieldRow(label: "Gemini Model", text: $config.geminiModelName, helper: "Example: gemini-1.5-flash")
+                ForEach(AIProvider.allCases, id: \.self) { provider in
+                    ProviderModelSelector(provider: provider)
+                }
             }
         }
     }
@@ -108,6 +112,26 @@ struct SettingsView: View {
         }
     }
 
+    private var diagnosticsSection: some View {
+        SettingSection(title: "Provider Diagnostics") {
+            VStack(spacing: 16) {
+                LuminaButton(
+                    label: aiManager.isRefreshingCatalogs ? "Refreshing..." : "Refresh Provider Diagnostics",
+                    action: {
+                        Task {
+                            await aiManager.refreshAllCatalogs()
+                        }
+                    },
+                    isPrimary: true
+                )
+
+                ForEach(AIProvider.allCases, id: \.self) { provider in
+                    ProviderDiagnosticRow(provider: provider)
+                }
+            }
+        }
+    }
+
     private var behaviorSection: some View {
         SettingSection(title: "Behavior") {
             VStack(alignment: .leading, spacing: 16) {
@@ -126,7 +150,7 @@ struct SettingsView: View {
                             .stroke(theme.outlineVariant.opacity(0.15), lineWidth: 1)
                     )
 
-                HStack(spacing: 12) {
+                VStack(spacing: 12) {
                     ToggleSetting(label: "Cross-session Memory", isOn: $config.isSemanticMemoryEnabled)
                     ToggleSetting(label: "Web Browsing", isOn: $config.isWebBrowsingEnabled)
                 }
@@ -139,7 +163,7 @@ struct SettingsView: View {
     private var privacySection: some View {
         SettingSection(title: "Local Data") {
             VStack(alignment: .leading, spacing: 14) {
-                Text("Conversation history is persisted inside the app's local storage to support resuming chats.")
+                Text("Conversation history is persisted inside the app's local storage to support resuming chats and export.")
                     .font(theme.appFont(size: 14))
                     .foregroundColor(theme.onSurface.opacity(0.62))
 
@@ -151,20 +175,49 @@ struct SettingsView: View {
     }
 }
 
-private struct ModelFieldRow: View {
-    let label: String
-    @Binding var text: String
-    let helper: String
+private struct ProviderModelSelector: View {
+    let provider: AIProvider
 
+    @ObservedObject private var config = ConfigManager.shared
     @ObservedObject private var theme = ThemeManager.shared
+    @ObservedObject private var aiManager = AIManager.shared
+
+    private var models: [String] {
+        aiManager.providerCatalogs[provider] ?? []
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(label)
-                .font(theme.appFont(size: 16))
-                .foregroundColor(theme.onSurface.opacity(0.82))
+            HStack {
+                Text("\(provider.displayName) Model")
+                    .font(theme.appFont(size: 16))
+                    .foregroundColor(theme.onSurface.opacity(0.82))
 
-            TextField(label, text: $text)
+                Spacer()
+
+                if config.selectedProvider == provider {
+                    Text("Preferred")
+                        .font(theme.appFont(size: 12, weight: .semibold))
+                        .foregroundColor(theme.primary)
+                }
+            }
+
+            if !models.isEmpty {
+                Picker(provider.displayName, selection: Binding(
+                    get: { config.modelName(for: provider) },
+                    set: { config.setModelName($0, for: provider) }
+                )) {
+                    ForEach(models, id: \.self) { model in
+                        Text(model).tag(model)
+                    }
+                }
+                .pickerStyle(.menu)
+                .tint(theme.primary)
+            } else {
+                TextField("\(provider.displayName) model", text: Binding(
+                    get: { config.modelName(for: provider) },
+                    set: { config.setModelName($0, for: provider) }
+                ))
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .padding()
@@ -175,10 +228,101 @@ private struct ModelFieldRow: View {
                     RoundedRectangle(cornerRadius: 12)
                         .stroke(theme.outlineVariant.opacity(0.15), lineWidth: 1)
                 )
+            }
 
-            Text(helper)
+            Text(models.isEmpty ? "Type a model manually or refresh diagnostics to load a catalog." : "\(models.count) models detected.")
                 .font(theme.appFont(size: 12))
                 .foregroundColor(theme.onSurface.opacity(0.5))
+        }
+    }
+}
+
+private struct ProviderDiagnosticRow: View {
+    let provider: AIProvider
+
+    @ObservedObject private var aiManager = AIManager.shared
+    @ObservedObject private var config = ConfigManager.shared
+    @ObservedObject private var theme = ThemeManager.shared
+
+    private var status: ProviderConnectionStatus {
+        aiManager.status(for: provider)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text(provider.displayName)
+                    .font(theme.appFont(size: 16, weight: .semibold))
+                    .foregroundColor(theme.onSurface)
+
+                Spacer()
+
+                Button(action: refresh) {
+                    Text("Test")
+                        .font(theme.appFont(size: 13, weight: .semibold))
+                        .foregroundColor(theme.primary)
+                }
+                .buttonStyle(.plain)
+                .disabled(!config.isConfigured(for: provider))
+                .opacity(config.isConfigured(for: provider) ? 1 : 0.45)
+            }
+
+            Text(status.message)
+                .font(theme.appFont(size: 13))
+                .foregroundColor(theme.onSurface.opacity(0.62))
+
+            HStack {
+                Text(statusLabel)
+                    .font(theme.appFont(size: 12, weight: .semibold))
+                    .foregroundColor(statusColor)
+
+                Spacer()
+
+                if let checkedAt = status.checkedAt {
+                    Text(checkedAt.formatted(date: .omitted, time: .shortened))
+                        .font(theme.appFont(size: 12))
+                        .foregroundColor(theme.onSurface.opacity(0.45))
+                }
+            }
+        }
+        .padding(16)
+        .background(theme.surfaceContainerLow)
+        .cornerRadius(18)
+    }
+
+    private var statusLabel: String {
+        switch status.phase {
+        case .idle:
+            return "Idle"
+        case .checking:
+            return "Checking"
+        case .connected:
+            return "Connected"
+        case .failed:
+            return "Failed"
+        case .notConfigured:
+            return "Not configured"
+        }
+    }
+
+    private var statusColor: Color {
+        switch status.phase {
+        case .connected:
+            return .green
+        case .checking:
+            return theme.primary
+        case .failed:
+            return .red
+        case .notConfigured:
+            return .orange
+        case .idle:
+            return theme.onSurface.opacity(0.55)
+        }
+    }
+
+    private func refresh() {
+        Task {
+            await aiManager.refreshCatalog(for: provider)
         }
     }
 }

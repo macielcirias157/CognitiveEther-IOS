@@ -21,6 +21,7 @@ struct MCPMarketplaceView: View {
         .background(theme.surface.ignoresSafeArea())
         .task {
             await aiManager.listLocalModels()
+            await aiManager.refreshAllCatalogs()
         }
     }
 
@@ -39,12 +40,14 @@ struct MCPMarketplaceView: View {
                 tint: config.isOllamaEnabled ? .green : .orange
             )
 
-            CapabilityStatusRow(
-                title: "Cloud Providers",
-                subtitle: "\(configuredCloudProviders) configured",
-                status: configuredCloudProviders > 0 ? "Ready" : "Missing keys",
-                tint: configuredCloudProviders > 0 ? .green : .orange
-            )
+            ForEach([AIProvider.openAI, .deepSeek, .gemini], id: \.self) { provider in
+                CapabilityStatusRow(
+                    title: provider.displayName,
+                    subtitle: aiManager.status(for: provider).message,
+                    status: providerStatusLabel(provider),
+                    tint: providerStatusColor(provider)
+                )
+            }
 
             CapabilityStatusRow(
                 title: "Local Models",
@@ -70,7 +73,7 @@ struct MCPMarketplaceView: View {
 
             CapabilityToggleRow(
                 name: "Web Browsing",
-                description: "Reserved switch for future browsing workflows. It does not invoke browsing by itself.",
+                description: "Controls the browsing capability flag used by the assistant runtime.",
                 icon: "globe",
                 isEnabled: $config.isWebBrowsingEnabled
             )
@@ -86,28 +89,61 @@ struct MCPMarketplaceView: View {
 
     private var integrationSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("External Integrations")
+            Text("Operational Features")
                 .font(theme.appFont(size: 20, weight: .semibold))
                 .foregroundColor(theme.onSurface)
 
             CapabilityStatusRow(
-                title: "GitHub MCP",
-                subtitle: "Not wired into the iOS app yet. If you want repo actions inside the app, we can define the flow next.",
-                status: "Pending",
-                tint: .orange
+                title: "History Export",
+                subtitle: "Conversation history can be exported from the History screen as a JSON archive.",
+                status: "Ready",
+                tint: .green
             )
 
             CapabilityStatusRow(
-                title: "Semantic Memory Store",
-                subtitle: "Current implementation reuses persisted conversations. Vector search is not implemented yet.",
-                status: config.isSemanticMemoryEnabled ? "Basic" : "Off",
-                tint: config.isSemanticMemoryEnabled ? .yellow : .orange
+                title: "Semantic Memory",
+                subtitle: "Recent conversations can be injected into new requests when memory is enabled.",
+                status: config.isSemanticMemoryEnabled ? "Enabled" : "Disabled",
+                tint: config.isSemanticMemoryEnabled ? .green : .orange
+            )
+
+            CapabilityStatusRow(
+                title: "Siri Shortcuts",
+                subtitle: "The app exposes an App Intent so prompts can be sent through Shortcuts.",
+                status: "Ready",
+                tint: .green
             )
         }
     }
 
-    private var configuredCloudProviders: Int {
-        [AIProvider.openAI, .deepSeek, .gemini].filter { config.isConfigured(for: $0) }.count
+    private func providerStatusLabel(_ provider: AIProvider) -> String {
+        switch aiManager.status(for: provider).phase {
+        case .connected:
+            return "Connected"
+        case .checking:
+            return "Checking"
+        case .failed:
+            return "Failed"
+        case .notConfigured:
+            return "Not configured"
+        case .idle:
+            return config.isConfigured(for: provider) ? "Idle" : "Not configured"
+        }
+    }
+
+    private func providerStatusColor(_ provider: AIProvider) -> Color {
+        switch aiManager.status(for: provider).phase {
+        case .connected:
+            return .green
+        case .checking:
+            return theme.primary
+        case .failed:
+            return .red
+        case .notConfigured:
+            return .orange
+        case .idle:
+            return config.isConfigured(for: provider) ? theme.onSurface.opacity(0.55) : .orange
+        }
     }
 }
 

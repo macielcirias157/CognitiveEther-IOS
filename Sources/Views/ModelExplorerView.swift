@@ -24,6 +24,7 @@ struct ModelExplorerView: View {
         .background(theme.surface.ignoresSafeArea())
         .task {
             await aiManager.listLocalModels()
+            await aiManager.refreshAllCatalogs()
         }
         .alert("Model operation failed", isPresented: Binding(
             get: { operationError != nil },
@@ -49,7 +50,7 @@ struct ModelExplorerView: View {
                 .font(theme.appFont(size: 14))
                 .foregroundColor(theme.primary)
 
-            Text("The chat screen will fall back automatically if the preferred provider is not configured.")
+            Text("Diagnostics below are fetched from the real providers, not a static list.")
                 .font(theme.appFont(size: 13))
                 .foregroundColor(theme.onSurface.opacity(0.55))
         }
@@ -61,20 +62,33 @@ struct ModelExplorerView: View {
 
     private var localModelsSection: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Ollama Local Models")
-                .font(theme.appFont(size: 20, weight: .semibold))
-                .foregroundColor(theme.onSurface)
+            HStack {
+                Text("Ollama Local Models")
+                    .font(theme.appFont(size: 20, weight: .semibold))
+                    .foregroundColor(theme.onSurface)
+
+                Spacer()
+
+                SmallRefreshButton {
+                    Task {
+                        await aiManager.listLocalModels()
+                    }
+                }
+            }
 
             if !config.isOllamaEnabled {
                 ModelExplorerInfoCard(text: "Enable Ollama in Settings to inspect or select local models.")
             } else if aiManager.localModels.isEmpty {
-                ModelExplorerInfoCard(text: "No local models found yet. Refresh after starting Ollama or pull one below.")
+                ModelExplorerInfoCard(text: aiManager.status(for: .ollama).message)
             } else {
                 ForEach(aiManager.localModels) { model in
                     LocalModelCard(
                         model: model,
                         isSelected: config.ollamaModelName == model.name,
-                        onSelect: { config.ollamaModelName = model.name },
+                        onSelect: {
+                            config.setModelName(model.name, for: .ollama)
+                            config.selectedProvider = .ollama
+                        },
                         onDelete: {
                             Task {
                                 do {
@@ -119,13 +133,7 @@ struct ModelExplorerView: View {
                 .foregroundColor(theme.onSurface)
 
             ForEach(AIProvider.allCases.filter { $0 != .ollama }, id: \.self) { provider in
-                CloudProviderCard(
-                    provider: provider,
-                    isConfigured: config.isConfigured(for: provider),
-                    currentModel: config.modelName(for: provider),
-                    isPreferred: config.selectedProvider == provider,
-                    onUseAsDefault: { config.selectedProvider = provider }
-                )
+                CloudProviderCard(provider: provider)
             }
         }
     }
@@ -247,12 +255,23 @@ private struct DownloadCard: View {
 
 private struct CloudProviderCard: View {
     let provider: AIProvider
-    let isConfigured: Bool
-    let currentModel: String
-    let isPreferred: Bool
-    let onUseAsDefault: () -> Void
 
+    @ObservedObject private var aiManager = AIManager.shared
+    @ObservedObject private var config = ConfigManager.shared
     @ObservedObject private var theme = ThemeManager.shared
+
+    private var models: [String] {
+        let catalog = aiManager.providerCatalogs[provider] ?? []
+        let current = config.modelName(for: provider)
+        if catalog.contains(current) || current.isEmpty {
+            return Array(catalog.prefix(8))
+        }
+        return Array(([current] + catalog).prefix(8))
+    }
+
+    private var status: ProviderConnectionStatus {
+        aiManager.status(for: provider)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -262,30 +281,68 @@ private struct CloudProviderCard: View {
                         .font(theme.appFont(size: 18, weight: .semibold))
                         .foregroundColor(theme.onSurface)
 
-                    Text(currentModel)
-                        .font(theme.appFont(size: 13))
-                        .foregroundColor(theme.primary)
+                    Text(status.message)
+                        .font(theme.appFont(size: 12))
+                        .foregroundColor(theme.onSurface.opacity(0.6))
                 }
 
                 Spacer()
 
-                Text(isConfigured ? "Configured" : "Missing key")
-                    .font(theme.appFont(size: 12, weight: .semibold))
-                    .foregroundColor(isConfigured ? .green : .orange)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background((isConfigured ? Color.green : Color.orange).opacity(0.14))
-                    .cornerRadius(12)
+                HStack(spacing: 10) {
+                    Text(config.isConfigured(for: provider) ? "Configured" : "Missing key")
+                        .font(theme.appFont(size: 12, weight: .semibold))
+                        .foregroundColor(statusColor)
+
+                    SmallRefreshButton {
+                        Task {
+                            await aiManager.refreshCatalog(for: provider)
+                        }
+                    }
+                    .disabled(!config.isConfigured(for: provider))
+                    .opacity(config.isConfigured(for: provider) ? 1 : 0.45)
+                }
             }
 
-            Text(isPreferred ? "This provider is currently preferred for new requests." : "Use this provider as the default routing target.")
-                .font(theme.appFont(size: 13))
-                .foregroundColor(theme.onSurface.opacity(0.58))
+            if models.isEmpty {
+                ModelExplorerInfoCard(text: "No remote models loaded yet for \(provider.displayName).")
+            } else {
+                ForEach(models, id: \.self) { model in
+                    Button(action: {
+                        config.setModelName(model, for: provider)
+                        config.selectedProvider = provider
+                    }) {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(model)
+                                    .font(theme.appFont(size: 14, weight: .semibold))
+                                    .foregroundColor(theme.onSurface)
+
+                                if config.selectedProvider == provider && config.modelName(for: provider) == model {
+                                    Text("Current routing target")
+                                        .font(theme.appFont(size: 11))
+                                        .foregroundColor(theme.primary)
+                                }
+                            }
+
+                            Spacer()
+
+                            if config.modelName(for: provider) == model {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(theme.primary)
+                            }
+                        }
+                        .padding(14)
+                        .background(theme.surfaceContainerLow)
+                        .cornerRadius(18)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
 
             LuminaButton(
-                label: isPreferred ? "Preferred Provider" : "Use As Default",
-                action: onUseAsDefault,
-                isPrimary: isPreferred
+                label: config.selectedProvider == provider ? "Preferred Provider" : "Use \(provider.displayName)",
+                action: { config.selectedProvider = provider },
+                isPrimary: config.selectedProvider == provider
             )
         }
         .padding(20)
@@ -293,8 +350,23 @@ private struct CloudProviderCard: View {
         .cornerRadius(24)
         .overlay(
             RoundedRectangle(cornerRadius: 24)
-                .stroke(isPreferred ? theme.primary.opacity(0.35) : theme.outlineVariant.opacity(0.15), lineWidth: 1)
+                .stroke(config.selectedProvider == provider ? theme.primary.opacity(0.35) : theme.outlineVariant.opacity(0.15), lineWidth: 1)
         )
+    }
+
+    private var statusColor: Color {
+        switch status.phase {
+        case .connected:
+            return .green
+        case .checking:
+            return theme.primary
+        case .failed:
+            return .red
+        case .notConfigured:
+            return .orange
+        case .idle:
+            return theme.onSurface.opacity(0.55)
+        }
     }
 }
 
@@ -311,5 +383,23 @@ private struct ModelExplorerInfoCard: View {
             .padding(18)
             .background(theme.surfaceContainer)
             .cornerRadius(24)
+    }
+}
+
+private struct SmallRefreshButton: View {
+    let action: () -> Void
+
+    @ObservedObject private var theme = ThemeManager.shared
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "arrow.clockwise")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(theme.primary)
+                .frame(width: 34, height: 34)
+                .background(theme.surfaceContainerLow)
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
     }
 }

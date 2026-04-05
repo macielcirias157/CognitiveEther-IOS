@@ -31,6 +31,36 @@ enum AIProvider: String, AppEnum, CaseIterable, Codable {
     }
 }
 
+enum ProviderConnectionPhase {
+    case idle
+    case checking
+    case connected
+    case failed
+    case notConfigured
+}
+
+struct ProviderConnectionStatus {
+    let phase: ProviderConnectionPhase
+    let message: String
+    let checkedAt: Date?
+
+    static func idle(for provider: AIProvider) -> ProviderConnectionStatus {
+        ProviderConnectionStatus(
+            phase: .idle,
+            message: "No checks run yet for \(provider.displayName).",
+            checkedAt: nil
+        )
+    }
+
+    static func notConfigured(for provider: AIProvider) -> ProviderConnectionStatus {
+        ProviderConnectionStatus(
+            phase: .notConfigured,
+            message: "\(provider.displayName) is not configured.",
+            checkedAt: nil
+        )
+    }
+}
+
 struct AIResponsePayload {
     let text: String
     let metrics: AIResponseMetrics
@@ -63,7 +93,7 @@ enum AIServiceError: LocalizedError {
         case .providerNotConfigured(let provider):
             return "\(provider.displayName) is not configured yet."
         case .invalidEndpoint:
-            return "The configured Ollama endpoint is invalid."
+            return "The configured endpoint is invalid."
         case .invalidResponse:
             return "The AI service returned an invalid response."
         case .upstream(let message):
@@ -79,33 +109,105 @@ final class AIManager: ObservableObject {
     @Published var isRequesting: Bool = false
     @Published var localModels: [OllamaModel] = []
     @Published var lastMetrics: AIResponseMetrics = .empty
+    @Published var providerCatalogs: [AIProvider: [String]] = [:]
+    @Published var providerStatuses: [AIProvider: ProviderConnectionStatus] = [:]
+    @Published var isRefreshingCatalogs: Bool = false
 
     private let config = ConfigManager.shared
     private let resourceManager = ResourceManager.shared
 
-    private init() {}
+    private init() {
+        AIProvider.allCases.forEach { providerStatuses[$0] = ProviderConnectionStatus.idle(for: $0) }
+    }
 
-    func listLocalModels() async {
-        guard config.isOllamaEnabled else {
+    func status(for provider: AIProvider) -> ProviderConnectionStatus {
+        providerStatuses[provider] ?? ProviderConnectionStatus.idle(for: provider)
+    }
+
+    func refreshAllCatalogs() async {
+        await MainActor.run {
+            self.isRefreshingCatalogs = true
+        }
+
+        defer {
+            Task { @MainActor in
+                self.isRefreshingCatalogs = false
+            }
+        }
+
+        for provider in AIProvider.allCases {
+            await refreshCatalog(for: provider)
+        }
+    }
+
+    func refreshCatalog(for provider: AIProvider) async {
+        guard config.isConfigured(for: provider) else {
             await MainActor.run {
-                self.localModels = []
+                self.providerCatalogs[provider] = []
+                self.providerStatuses[provider] = ProviderConnectionStatus.notConfigured(for: provider)
             }
             return
         }
 
-        guard let url = URL(string: "\(config.ollamaEndpoint)/api/tags") else { return }
+        await MainActor.run {
+            self.providerStatuses[provider] = ProviderConnectionStatus(
+                phase: .checking,
+                message: "Checking \(provider.displayName)...",
+                checkedAt: Date()
+            )
+        }
 
         do {
-            let (data, response) = try await URLSession.shared.data(from: url)
-            try validate(response: response, data: data)
-            let tagsResponse = try JSONDecoder().decode(OllamaTagsResponse.self, from: data)
-
+            let models = try await fetchCatalog(for: provider)
             await MainActor.run {
-                self.localModels = tagsResponse.models.sorted(by: { $0.name < $1.name })
-                self.config.updatePreferredOllamaModel(from: tagsResponse.models)
+                self.providerCatalogs[provider] = models
+                self.providerStatuses[provider] = ProviderConnectionStatus(
+                    phase: .connected,
+                    message: models.isEmpty
+                        ? "\(provider.displayName) responded, but no chat models were returned."
+                        : "\(models.count) models available from \(provider.displayName).",
+                    checkedAt: Date()
+                )
             }
         } catch {
-            print("Error listing Ollama models: \(error)")
+            await MainActor.run {
+                self.providerCatalogs[provider] = []
+                self.providerStatuses[provider] = ProviderConnectionStatus(
+                    phase: .failed,
+                    message: error.localizedDescription,
+                    checkedAt: Date()
+                )
+            }
+        }
+    }
+
+    func listLocalModels() async {
+        do {
+            let models = try await fetchOllamaModels()
+            await MainActor.run {
+                self.localModels = models
+                self.providerCatalogs[.ollama] = models.map(\.name)
+                self.providerStatuses[.ollama] = ProviderConnectionStatus(
+                    phase: .connected,
+                    message: models.isEmpty
+                        ? "Ollama responded, but no local models were found."
+                        : "\(models.count) local models available.",
+                    checkedAt: Date()
+                )
+            }
+            config.updatePreferredOllamaModel(from: models)
+        } catch {
+            await MainActor.run {
+                self.localModels = []
+                self.providerCatalogs[.ollama] = []
+                self.providerStatuses[.ollama] = config.isConfigured(for: .ollama)
+                    ? ProviderConnectionStatus(
+                        phase: .failed,
+                        message: error.localizedDescription,
+                        checkedAt: Date()
+                    )
+                    : ProviderConnectionStatus.notConfigured(for: .ollama)
+            }
         }
     }
 
@@ -194,6 +296,96 @@ final class AIManager: ObservableObject {
         }
 
         return AIResponsePayload(text: text, metrics: metrics)
+    }
+
+    private func fetchCatalog(for provider: AIProvider) async throws -> [String] {
+        switch provider {
+        case .ollama:
+            let models = try await fetchOllamaModels()
+            await MainActor.run {
+                self.localModels = models
+            }
+            config.updatePreferredOllamaModel(from: models)
+            return models.map(\.name)
+
+        case .openAI:
+            let request = try makeAuthorizedRequest(
+                urlString: "https://api.openai.com/v1/models",
+                bearerToken: config.openAIKey
+            )
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            let modelResponse = try JSONDecoder().decode(OpenAIModelListResponse.self, from: data)
+            return sanitizeModelIDs(modelResponse.data.map(\.id))
+
+        case .deepSeek:
+            let request = try makeAuthorizedRequest(
+                urlString: "https://api.deepseek.com/models",
+                bearerToken: config.deepSeekKey
+            )
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            let modelResponse = try JSONDecoder().decode(OpenAIModelListResponse.self, from: data)
+            return sanitizeModelIDs(modelResponse.data.map(\.id))
+
+        case .gemini:
+            guard let url = URL(string: "https://generativelanguage.googleapis.com/v1beta/models?key=\(config.geminiKey)") else {
+                throw AIServiceError.invalidEndpoint
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            let (data, response) = try await URLSession.shared.data(for: request)
+            try validate(response: response, data: data)
+            let modelResponse = try JSONDecoder().decode(GeminiModelListResponse.self, from: data)
+
+            let models = modelResponse.models
+                .filter { $0.supportedGenerationMethods.contains("generateContent") }
+                .compactMap { model -> String? in
+                    if let baseModelID = model.baseModelID, !baseModelID.isEmpty {
+                        return baseModelID
+                    }
+                    return model.name.split(separator: "/").last.map(String.init)
+                }
+
+            return sanitizeModelIDs(models)
+        }
+    }
+
+    private func fetchOllamaModels() async throws -> [OllamaModel] {
+        guard config.isConfigured(for: .ollama) else {
+            return []
+        }
+
+        guard let url = URL(string: "\(config.ollamaEndpoint)/api/tags") else {
+            throw AIServiceError.invalidEndpoint
+        }
+
+        let (data, response) = try await URLSession.shared.data(from: url)
+        try validate(response: response, data: data)
+        let tagsResponse = try JSONDecoder().decode(OllamaTagsResponse.self, from: data)
+        return tagsResponse.models.sorted(by: { $0.name < $1.name })
+    }
+
+    private func makeAuthorizedRequest(urlString: String, bearerToken: String) throws -> URLRequest {
+        guard let url = URL(string: urlString) else {
+            throw AIServiceError.invalidEndpoint
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(bearerToken)", forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    private func sanitizeModelIDs(_ models: [String]) -> [String] {
+        Array(
+            Set(
+                models.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+            )
+        )
+        .sorted()
     }
 
     private func buildConversationMessages(from history: [Message]) -> [ProviderMessage] {
@@ -449,6 +641,14 @@ struct OpenAIResponse: Codable {
     let choices: [Choice]
 }
 
+private struct OpenAIModelListResponse: Codable {
+    let data: [OpenAIModelDescriptor]
+}
+
+private struct OpenAIModelDescriptor: Codable {
+    let id: String
+}
+
 private struct GeminiRequest: Codable {
     let systemInstruction: GeminiInstruction
     let contents: [GeminiContent]
@@ -492,6 +692,22 @@ struct GeminiResponse: Codable {
     }
 
     let candidates: [Candidate]
+}
+
+private struct GeminiModelListResponse: Codable {
+    let models: [GeminiListedModel]
+}
+
+private struct GeminiListedModel: Codable {
+    let name: String
+    let baseModelID: String?
+    let supportedGenerationMethods: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case baseModelID = "baseModelId"
+        case supportedGenerationMethods
+    }
 }
 
 struct OllamaTagsResponse: Codable {

@@ -49,7 +49,7 @@ final class ConfigManager: ObservableObject {
         ollamaModelName = defaults.string(forKey: Keys.ollamaModelName) ?? "llama3"
         openAIModelName = defaults.string(forKey: Keys.openAIModelName) ?? "gpt-4o"
         deepSeekModelName = defaults.string(forKey: Keys.deepSeekModelName) ?? "deepseek-chat"
-        geminiModelName = defaults.string(forKey: Keys.geminiModelName) ?? "gemini-1.5-flash"
+        geminiModelName = defaults.string(forKey: Keys.geminiModelName) ?? "gemini-2.5-flash"
 
         temperature = defaults.object(forKey: Keys.temperature) as? Double ?? 0.7
         topP = defaults.object(forKey: Keys.topP) as? Double ?? 0.9
@@ -109,7 +109,20 @@ final class ConfigManager: ObservableObject {
         case .deepSeek:
             return sanitizedModelName(deepSeekModelName, fallback: "deepseek-chat")
         case .gemini:
-            return sanitizedModelName(geminiModelName, fallback: "gemini-1.5-flash")
+            return sanitizedModelName(geminiModelName, fallback: "gemini-2.5-flash")
+        }
+    }
+
+    func setModelName(_ model: String, for provider: AIProvider) {
+        switch provider {
+        case .ollama:
+            ollamaModelName = model
+        case .openAI:
+            openAIModelName = model
+        case .deepSeek:
+            deepSeekModelName = model
+        case .gemini:
+            geminiModelName = model
         }
     }
 

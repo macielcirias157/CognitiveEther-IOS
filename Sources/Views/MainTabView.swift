@@ -40,6 +40,7 @@ struct MainTabView: View {
         .onAppear {
             Task {
                 await AIManager.shared.listLocalModels()
+                await AIManager.shared.refreshAllCatalogs()
             }
         }
     }

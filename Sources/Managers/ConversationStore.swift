@@ -67,6 +67,36 @@ final class ConversationStore: ObservableObject {
         createNewSession()
     }
 
+    func renameSession(id: UUID, title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        mutateSession(id: id) { session in
+            session.title = trimmed
+            session.updatedAt = Date()
+        }
+    }
+
+    func deleteSession(id: UUID) {
+        guard let index = sessions.firstIndex(where: { $0.id == id }) else { return }
+
+        let wasActive = activeSessionID == id
+        sessions.remove(at: index)
+
+        if sessions.isEmpty {
+            activeSessionID = nil
+            save()
+            createNewSession()
+            return
+        }
+
+        if wasActive || !sessions.contains(where: { $0.id == activeSessionID }) {
+            activeSessionID = sessions[0].id
+        }
+
+        save()
+    }
+
     func updateSessionMetadata(id: UUID, provider: AIProvider, model: String) {
         mutateSession(id: id) { session in
             session.providerID = provider.rawValue
@@ -137,6 +167,40 @@ final class ConversationStore: ObservableObject {
             guard let providerID = session.providerID else { return }
             partialResult[providerID, default: 0] += 1
         }
+    }
+
+    func transcript(for sessionID: UUID?) -> String {
+        let selectedMessages = messages(for: sessionID)
+            .filter { $0.role == .user || $0.role == .assistant }
+
+        guard !selectedMessages.isEmpty else {
+            return "No transcript available."
+        }
+
+        return selectedMessages.map { message in
+            let speaker = message.role == .user ? "User" : "Assistant"
+            return """
+            [\(message.timestamp.formatted(date: .abbreviated, time: .shortened))] \(speaker)
+            \(message.content)
+            """
+        }
+        .joined(separator: "\n\n")
+    }
+
+    func exportArchive() throws -> URL {
+        let formatter = ISO8601DateFormatter()
+        let stamp = formatter.string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CognitiveEther-History-\(stamp).json")
+
+        let payload = PersistedConversations(
+            activeSessionID: activeSessionID,
+            sessions: sessions
+        )
+        let data = try encoder.encode(payload)
+        try data.write(to: url, options: [.atomic])
+        return url
     }
 
     private func mutateSession(id: UUID, mutation: (inout ChatSession) -> Void) {
