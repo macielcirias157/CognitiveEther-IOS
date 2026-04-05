@@ -1,6 +1,8 @@
 import Foundation
 import AppIntents
+import SwiftUI
 
+@available(iOS 16.0, *)
 struct AskCognitiveEtherIntent: AppIntent {
     static var title: LocalizedStringResource = "Ask Cognitive Ether"
     static var description = IntentDescription("Send a prompt to Cognitive Ether and get a response.")
@@ -28,6 +30,7 @@ struct AskCognitiveEtherIntent: AppIntent {
     }
 }
 
+@available(iOS 16.0, *)
 struct CognitiveEtherShortcuts: AppShortcutsProvider {
     static var appShortcuts: [AppShortcut] {
         AppShortcut(

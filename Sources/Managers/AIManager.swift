@@ -1,7 +1,9 @@
 import Foundation
 import Combine
 import AppIntents
+import SwiftUI
 
+@available(iOS 16.0, *)
 enum AIProvider: String, AppEnum {
     case ollama
     case openAI
