@@ -22,8 +22,13 @@ struct AskCognitiveEtherIntent: AppIntent {
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
         do {
-            let response = try await AIManager.shared.generateResponse(prompt: prompt, provider: provider, model: model)
-            return .result(value: response)
+            let history = [Message(content: prompt, role: .user)]
+            let response = try await AIManager.shared.generateResponse(
+                history: history,
+                provider: provider,
+                model: model
+            )
+            return .result(value: response.text)
         } catch {
             return .result(value: "Error: \(error.localizedDescription)")
         }

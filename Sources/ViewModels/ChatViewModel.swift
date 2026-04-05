@@ -1,124 +1,167 @@
 import Foundation
 import Combine
 
-class ChatViewModel: ObservableObject {
+final class ChatViewModel: ObservableObject {
+    static let shared = ChatViewModel()
+
     @Published var messages: [Message] = []
     @Published var inputText: String = ""
     @Published var isProcessing: Bool = false
-    
-    init() {
-        // Welcome message
-        messages.append(Message(
-            content: "Welcome to Cognitive Ether. How can I assist you today?",
-            role: .assistant,
-            timestamp: Date()
-        ))
+
+    private let store = ConversationStore.shared
+    private let config = ConfigManager.shared
+    private let aiManager = AIManager.shared
+    private var cancellables: Set<AnyCancellable> = []
+
+    private init() {
+        bindStore()
+        refreshMessages()
     }
-    
+
+    var activeSession: ChatSession? {
+        store.activeSession
+    }
+
+    var activeTitle: String {
+        activeSession?.title ?? "Cognitive Ether"
+    }
+
+    var activeProviderLabel: String {
+        guard let provider = config.preferredProvider() else {
+            return "No provider configured"
+        }
+
+        let model = config.modelName(for: provider)
+        return "\(provider.displayName) - \(model)"
+    }
+
     func sendMessage() {
-        guard !inputText.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        
-        let userMessage = Message(
-            content: inputText,
-            role: .user,
-            timestamp: Date()
-        )
-        messages.append(userMessage)
-        let currentInput = inputText
-        inputText = ""
-        isProcessing = true
-        
-        callAI(prompt: currentInput)
-    }
-    
-    private func callAI(prompt: String) {
-        let config = ConfigManager.shared
-        
-        // Determine provider and model
-        let provider: AIProvider
-        let model: String
-        
-        if config.isOllamaEnabled {
-            provider = .ollama
-            // Use the first local model if available, otherwise default to llama3
-            model = AIManager.shared.localModels.first?.name ?? "llama3"
-        } else if !config.openAIKey.isEmpty {
-            provider = .openAI
-            model = "gpt-4o"
-        } else if !config.deepSeekKey.isEmpty {
-            provider = .deepSeek
-            model = "deepseek-chat"
-        } else if !config.geminiKey.isEmpty {
-            provider = .gemini
-            model = "gemini-1.5-flash"
-        } else {
-            // No provider configured
-            self.messages.removeAll(where: { $0.role == .reasoning })
-            let errorMsg = Message(
-                content: "No AI provider configured. Please enable Ollama or add an API Key in Settings.",
-                role: .assistant,
-                timestamp: Date()
-            )
-            self.messages.append(errorMsg)
-            self.isProcessing = false
+        let prompt = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty else { return }
+
+        guard let provider = config.preferredProvider() else {
+            appendSystemMessage("No AI provider configured. Add an API key or enable Ollama in Settings.")
+            inputText = ""
             return
         }
-        
-        // Add a reasoning message
-        var reasoningContent = "Connecting to \(provider.rawValue.capitalized)..."
-        if provider == .ollama {
-            reasoningContent += "\n- Using local endpoint: \(config.ollamaEndpoint)"
-            reasoningContent += "\n- Target model: \(model)"
+
+        if store.activeSession == nil {
+            store.createNewSession()
         }
-        
-        if config.isSemanticMemoryEnabled {
-            reasoningContent += "\n- Semantic Memory: Active"
-        }
-        
+
+        guard let session = store.activeSession else { return }
+
+        let model = config.modelName(for: provider)
+        inputText = ""
+        isProcessing = true
+
+        let userMessage = Message(content: prompt, role: .user)
         let reasoningMessage = Message(
-            content: reasoningContent,
+            content: makeReasoningMessage(provider: provider, model: model),
             role: .reasoning,
-            timestamp: Date(),
             isThinking: true
         )
-        messages.append(reasoningMessage)
-        
+
+        store.updateSessionMetadata(id: session.id, provider: provider, model: model)
+        store.appendMessage(userMessage, to: session.id)
+        store.appendMessage(reasoningMessage, to: session.id)
+
         Task {
             do {
-                let response = try await AIManager.shared.generateResponse(
-                    prompt: prompt,
+                let history = store.messages(for: session.id)
+                let memoryContext = config.isSemanticMemoryEnabled
+                    ? store.recentMemoryContext(excluding: session.id)
+                    : nil
+
+                let response = try await aiManager.generateResponse(
+                    history: history,
                     provider: provider,
-                    model: model
+                    model: model,
+                    memoryContext: memoryContext
                 )
-                
+
                 await MainActor.run {
-                    self.messages.removeAll(where: { $0.role == .reasoning })
-                    let assistantMessage = Message(
-                        content: response,
-                        role: .assistant,
-                        timestamp: Date()
+                    self.store.removeThinkingMessages(from: session.id)
+                    self.store.appendMessage(
+                        Message(content: response.text, role: .assistant),
+                        to: session.id
                     )
-                    self.messages.append(assistantMessage)
                     self.isProcessing = false
                 }
             } catch {
                 await MainActor.run {
-                    self.messages.removeAll(where: { $0.role == .reasoning })
-                    let errorContent: String
-                    if (error as NSError).domain == NSURLErrorDomain {
-                        errorContent = "Connection Error: Could not reach \(provider.rawValue). Check your network or local server status."
-                    } else {
-                        errorContent = "Error: \(error.localizedDescription)"
-                    }
-                    let errorMessage = Message(
-                        content: errorContent,
-                        role: .assistant,
-                        timestamp: Date()
+                    self.store.removeThinkingMessages(from: session.id)
+                    self.store.appendMessage(
+                        Message(content: self.describe(error, provider: provider), role: .assistant),
+                        to: session.id
                     )
-                    self.messages.append(errorMessage)
                     self.isProcessing = false
                 }
             }
         }
+    }
+
+    func createNewConversation() {
+        store.createNewSession()
+    }
+
+    func selectConversation(id: UUID) {
+        store.selectSession(id: id)
+    }
+
+    func clearHistory() {
+        store.clearHistory()
+    }
+
+    private func bindStore() {
+        store.$sessions
+            .combineLatest(store.$activeSessionID)
+            .sink { [weak self] _, _ in
+                self?.refreshMessages()
+            }
+            .store(in: &cancellables)
+    }
+
+    private func refreshMessages() {
+        messages = store.activeSession?.messages ?? []
+    }
+
+    private func appendSystemMessage(_ text: String) {
+        if store.activeSession == nil {
+            store.createNewSession()
+        }
+
+        guard let session = store.activeSession else { return }
+        store.appendMessage(Message(content: text, role: .assistant), to: session.id)
+    }
+
+    private func makeReasoningMessage(provider: AIProvider, model: String) -> String {
+        var lines = [
+            "Provider: \(provider.displayName)",
+            "Model: \(model)",
+            "Temperature: \(String(format: "%.2f", config.temperature))",
+            "Top-P: \(String(format: "%.2f", config.topP))",
+            "Context Window: \(config.contextWindow)"
+        ]
+
+        if provider == .ollama {
+            lines.append("Endpoint: \(config.ollamaEndpoint)")
+        }
+
+        if config.isSemanticMemoryEnabled {
+            lines.append("Cross-session memory: enabled")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    private func describe(_ error: Error, provider: AIProvider) -> String {
+        let nsError = error as NSError
+
+        if nsError.domain == NSURLErrorDomain {
+            return "Connection error while contacting \(provider.displayName). Check the endpoint, your network, or the API key."
+        }
+
+        return error.localizedDescription
     }
 }

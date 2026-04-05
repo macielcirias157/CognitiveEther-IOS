@@ -28,12 +28,12 @@ struct MainTabView: View {
             
             MCPMarketplaceView()
                 .tabItem {
-                    Label("Skills", systemImage: "puzzlepiece")
+                    Label("Tools", systemImage: "puzzlepiece")
                 }
             
             LabView()
                 .tabItem {
-                    Label("Lab", systemImage: "flask")
+                    Label("Prompts", systemImage: "flask")
                 }
         }
         .accentColor(theme.primary)

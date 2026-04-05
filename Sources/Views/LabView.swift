@@ -1,63 +1,118 @@
 import SwiftUI
 
 struct LabView: View {
-    @ObservedObject var theme = ThemeManager.shared
-    
+    @ObservedObject private var theme = ThemeManager.shared
+    @ObservedObject private var config = ConfigManager.shared
+
+    private let presets: [PromptPreset] = [
+        PromptPreset(
+            title: "Pragmatic Engineer",
+            description: "Direct, implementation-focused answers with explicit tradeoffs and next steps.",
+            icon: "hammer",
+            prompt: "You are a pragmatic senior engineer. Answer directly, reason clearly, and optimize for execution."
+        ),
+        PromptPreset(
+            title: "Research Analyst",
+            description: "Structured synthesis, assumptions called out, and concise conclusions.",
+            icon: "chart.bar.doc.horizontal",
+            prompt: "You are a research analyst. Summarize facts, note uncertainty, and separate findings from interpretation."
+        ),
+        PromptPreset(
+            title: "Writing Editor",
+            description: "Tightens drafts, improves structure, and preserves the original intent.",
+            icon: "text.quote",
+            prompt: "You are an editor. Rewrite for clarity, precision, and flow while preserving the author's meaning."
+        )
+    ]
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 32) {
-                Text("Multi-modal Lab")
+            VStack(alignment: .leading, spacing: 28) {
+                Text("Prompt Lab")
                     .font(theme.appFont(size: 32, weight: .bold))
                     .foregroundColor(theme.onSurface)
-                
+
+                activePromptCard
+
                 VStack(alignment: .leading, spacing: 16) {
-                    LabModule(title: "Document Analysis", description: "Upload and analyze PDFs, Word, and text files locally.", icon: "doc.text.magnifyingglass")
-                    LabModule(title: "Audio Transcription", description: "Convert speech to text using Whisper-large-v3.", icon: "waveform.circle")
-                    LabModule(title: "Visual Direct Capture", description: "Use the camera for real-time vision analysis.", icon: "camera.viewfinder")
+                    Text("Reusable Presets")
+                        .font(theme.appFont(size: 20, weight: .semibold))
+                        .foregroundColor(theme.onSurface)
+
+                    ForEach(presets) { preset in
+                        PromptPresetCard(preset: preset) {
+                            config.defaultSystemPrompt = preset.prompt
+                        }
+                    }
                 }
             }
             .padding()
         }
         .background(theme.surface.ignoresSafeArea())
     }
+
+    private var activePromptCard: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Current System Prompt")
+                .font(theme.appFont(size: 18, weight: .semibold))
+                .foregroundColor(theme.onSurface)
+
+            Text(config.defaultSystemPrompt)
+                .font(theme.appFont(size: 14))
+                .foregroundColor(theme.onSurface.opacity(0.7))
+
+            Text("Applying a preset replaces the default runtime behavior immediately for future requests.")
+                .font(theme.appFont(size: 12))
+                .foregroundColor(theme.onSurface.opacity(0.5))
+        }
+        .padding(22)
+        .background(theme.surfaceContainer)
+        .cornerRadius(28)
+    }
 }
 
-struct LabModule: View {
+private struct PromptPreset: Identifiable {
+    let id = UUID()
     let title: String
     let description: String
     let icon: String
-    @ObservedObject var theme = ThemeManager.shared
-    
+    let prompt: String
+}
+
+private struct PromptPresetCard: View {
+    let preset: PromptPreset
+    let onApply: () -> Void
+
+    @ObservedObject private var theme = ThemeManager.shared
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 16) {
-                Image(systemName: icon)
-                    .font(.system(size: 24))
+                Image(systemName: preset.icon)
+                    .font(.system(size: 20))
                     .foregroundColor(theme.primary)
-                    .frame(width: 56, height: 56)
+                    .frame(width: 52, height: 52)
                     .background(theme.surfaceContainerHigh)
                     .cornerRadius(16)
-                
+
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
+                    Text(preset.title)
                         .font(theme.appFont(size: 18, weight: .semibold))
                         .foregroundColor(theme.onSurface)
-                    
-                    Text(description)
+
+                    Text(preset.description)
                         .font(theme.appFont(size: 14))
-                        .foregroundColor(theme.onSurface.opacity(0.6))
+                        .foregroundColor(theme.onSurface.opacity(0.62))
                 }
             }
-            
-            LuminaButton(label: "Launch Module", action: {
-                // Launch module action
-            }, isPrimary: true)
+
+            LuminaButton(label: "Apply Preset", action: onApply, isPrimary: true)
         }
-        .padding(24)
+        .padding(22)
         .background(theme.surfaceContainer)
-        .cornerRadius(32)
+        .cornerRadius(28)
         .overlay(
-            RoundedRectangle(cornerRadius: 32)
+            RoundedRectangle(cornerRadius: 28)
                 .stroke(theme.outlineVariant.opacity(0.15), lineWidth: 1)
         )
     }

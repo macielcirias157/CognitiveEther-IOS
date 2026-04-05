@@ -1,96 +1,163 @@
 import SwiftUI
 
-struct Skill: Identifiable {
-    let id = UUID()
-    let name: String
-    let description: String
-    let icon: String
-    var isEnabled: Bool = false
-}
-
 struct MCPMarketplaceView: View {
-    @State private var skills: [Skill] = [
-        Skill(name: "File Explorer", description: "Search and read local files.", icon: "folder.badge.search"),
-        Skill(name: "Web Search", description: "Access live internet data.", icon: "globe"),
-        Skill(name: "SQLite Integration", description: "Connect to local databases.", icon: "externaldrive.badge.icloud"),
-        Skill(name: "GitHub Client", description: "Manage repositories and PRs.", icon: "terminal"),
-        Skill(name: "Ollama Local API", description: "Bridge to your local Ollama server.", icon: "network")
-    ]
-    
-    @ObservedObject var theme = ThemeManager.shared
-    @ObservedObject var config = ConfigManager.shared
-    
+    @ObservedObject private var theme = ThemeManager.shared
+    @ObservedObject private var config = ConfigManager.shared
+    @ObservedObject private var aiManager = AIManager.shared
+
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 32) {
-                Text("Skills & MCP Marketplace")
+            VStack(alignment: .leading, spacing: 28) {
+                Text("Capabilities")
                     .font(theme.appFont(size: 32, weight: .bold))
                     .foregroundColor(theme.onSurface)
-                
-                if config.isOllamaEnabled {
-                    HStack {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                        Text("Ollama Connected: \(config.ollamaEndpoint)")
-                            .font(theme.appFont(size: 14))
-                            .foregroundColor(theme.onSurface.opacity(0.6))
-                    }
-                    .padding()
-                    .background(theme.surfaceContainerLow)
-                    .cornerRadius(16)
-                }
-                
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Local Skills")
-                        .font(theme.appFont(size: 20, weight: .semibold))
-                        .foregroundColor(theme.onSurface)
-                    
-                    SkillRow(name: "File Explorer", description: "Search and read local files.", icon: "folder.badge.search", isEnabled: .constant(true))
-                    SkillRow(name: "Web Search", description: "Access live internet data.", icon: "globe", isEnabled: .constant(true))
-                    SkillRow(name: "SQLite Integration", description: "Connect to local databases.", icon: "externaldrive.badge.icloud", isEnabled: .constant(false))
-                    SkillRow(name: "GitHub Client", description: "Manage repositories and PRs.", icon: "terminal", isEnabled: .constant(false))
-                }
-                
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Advanced AI Skills")
-                        .font(theme.appFont(size: 20, weight: .semibold))
-                        .foregroundColor(theme.onSurface)
-                    
-                    SkillRow(name: "Semantic Memory", description: "Retain context and facts across different chat sessions.", icon: "brain.headset", isEnabled: $config.isSemanticMemoryEnabled)
-                    
-                    SkillRow(name: "Web Browser (MCP)", description: "Open a headless browser to navigate and extract web content.", icon: "safari", isEnabled: $config.isWebBrowsingEnabled)
-                    
-                    SkillRow(name: "Ollama Local API", description: "Bridge to your local Ollama server.", icon: "network", isEnabled: $config.isOllamaEnabled)
-                }
-                
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("Discover New Skills")
-                        .font(theme.appFont(size: 20, weight: .semibold))
-                        .foregroundColor(theme.onSurface)
-                    
-                    Text("Browse the community store for new MCP servers and integrations.")
-                        .font(theme.appFont(size: 14))
-                        .foregroundColor(theme.onSurface.opacity(0.6))
-                    
-                    LuminaButton(label: "Open Store", action: {
-                        // Open store action
-                    }, isPrimary: false)
-                }
+
+                statusSection
+                togglesSection
+                integrationSection
             }
             .padding()
         }
         .background(theme.surface.ignoresSafeArea())
+        .task {
+            await aiManager.listLocalModels()
+        }
+    }
+
+    private var statusSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Runtime Status")
+                .font(theme.appFont(size: 20, weight: .semibold))
+                .foregroundColor(theme.onSurface)
+
+            CapabilityStatusRow(
+                title: "Ollama",
+                subtitle: config.isOllamaEnabled
+                    ? "Endpoint: \(config.ollamaEndpoint)"
+                    : "Disabled in settings.",
+                status: config.isOllamaEnabled ? "Enabled" : "Disabled",
+                tint: config.isOllamaEnabled ? .green : .orange
+            )
+
+            CapabilityStatusRow(
+                title: "Cloud Providers",
+                subtitle: "\(configuredCloudProviders) configured",
+                status: configuredCloudProviders > 0 ? "Ready" : "Missing keys",
+                tint: configuredCloudProviders > 0 ? .green : .orange
+            )
+
+            CapabilityStatusRow(
+                title: "Local Models",
+                subtitle: "\(aiManager.localModels.count) Ollama models detected",
+                status: aiManager.localModels.isEmpty ? "Empty" : "Available",
+                tint: aiManager.localModels.isEmpty ? .orange : .green
+            )
+        }
+    }
+
+    private var togglesSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Capabilities")
+                .font(theme.appFont(size: 20, weight: .semibold))
+                .foregroundColor(theme.onSurface)
+
+            CapabilityToggleRow(
+                name: "Cross-session Memory",
+                description: "Injects relevant context from recent conversations into new prompts.",
+                icon: "brain.head.profile",
+                isEnabled: $config.isSemanticMemoryEnabled
+            )
+
+            CapabilityToggleRow(
+                name: "Web Browsing",
+                description: "Reserved switch for future browsing workflows. It does not invoke browsing by itself.",
+                icon: "globe",
+                isEnabled: $config.isWebBrowsingEnabled
+            )
+
+            CapabilityToggleRow(
+                name: "Ollama Access",
+                description: "Enables local model discovery and inference through your Ollama endpoint.",
+                icon: "network",
+                isEnabled: $config.isOllamaEnabled
+            )
+        }
+    }
+
+    private var integrationSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("External Integrations")
+                .font(theme.appFont(size: 20, weight: .semibold))
+                .foregroundColor(theme.onSurface)
+
+            CapabilityStatusRow(
+                title: "GitHub MCP",
+                subtitle: "Not wired into the iOS app yet. If you want repo actions inside the app, we can define the flow next.",
+                status: "Pending",
+                tint: .orange
+            )
+
+            CapabilityStatusRow(
+                title: "Semantic Memory Store",
+                subtitle: "Current implementation reuses persisted conversations. Vector search is not implemented yet.",
+                status: config.isSemanticMemoryEnabled ? "Basic" : "Off",
+                tint: config.isSemanticMemoryEnabled ? .yellow : .orange
+            )
+        }
+    }
+
+    private var configuredCloudProviders: Int {
+        [AIProvider.openAI, .deepSeek, .gemini].filter { config.isConfigured(for: $0) }.count
     }
 }
 
-struct SkillRow: View {
+private struct CapabilityStatusRow: View {
+    let title: String
+    let subtitle: String
+    let status: String
+    let tint: Color
+
+    @ObservedObject private var theme = ThemeManager.shared
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 16) {
+            Circle()
+                .fill(tint)
+                .frame(width: 10, height: 10)
+                .padding(.top, 6)
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text(title)
+                        .font(theme.appFont(size: 16, weight: .semibold))
+                        .foregroundColor(theme.onSurface)
+
+                    Spacer()
+
+                    Text(status)
+                        .font(theme.appFont(size: 12, weight: .semibold))
+                        .foregroundColor(tint)
+                }
+
+                Text(subtitle)
+                    .font(theme.appFont(size: 13))
+                    .foregroundColor(theme.onSurface.opacity(0.62))
+            }
+        }
+        .padding(18)
+        .background(theme.surfaceContainer)
+        .cornerRadius(24)
+    }
+}
+
+private struct CapabilityToggleRow: View {
     let name: String
     let description: String
     let icon: String
     @Binding var isEnabled: Bool
-    
-    @ObservedObject var theme = ThemeManager.shared
-    
+
+    @ObservedObject private var theme = ThemeManager.shared
+
     var body: some View {
         HStack(spacing: 16) {
             Image(systemName: icon)
@@ -98,29 +165,25 @@ struct SkillRow: View {
                 .foregroundColor(theme.primary)
                 .frame(width: 48, height: 48)
                 .background(theme.surfaceContainerHigh)
-                .cornerRadius(12)
-            
+                .cornerRadius(14)
+
             VStack(alignment: .leading, spacing: 4) {
                 Text(name)
                     .font(theme.appFont(size: 16, weight: .semibold))
                     .foregroundColor(theme.onSurface)
-                
+
                 Text(description)
                     .font(theme.appFont(size: 12))
                     .foregroundColor(theme.onSurface.opacity(0.6))
             }
-            
+
             Spacer()
-            
+
             Toggle("", isOn: $isEnabled)
                 .toggleStyle(SwitchToggleStyle(tint: theme.primary))
         }
         .padding(16)
         .background(theme.surfaceContainer)
         .cornerRadius(24)
-        .overlay(
-            RoundedRectangle(cornerRadius: 24)
-                .stroke(theme.outlineVariant.opacity(0.15), lineWidth: 1)
-        )
     }
 }
