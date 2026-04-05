@@ -27,6 +27,9 @@ jobs:
           -sdk iphoneos \
           -configuration Release \
           CODE_SIGNING_ALLOWED=NO \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGN_IDENTITY="" \
+          AD_HOC_CODE_SIGNING_ALLOWED=YES \
           CONFIGURATION_BUILD_DIR=build/Release-iphoneos
           
     - name: Create IPA
