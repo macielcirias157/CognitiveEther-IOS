@@ -1,9 +1,8 @@
 import SwiftUI
 
 struct ResourceMonitorView: View {
-    @State private var ramUsage: Double = 0.45
-    @State private var gpuUsage: Double = 0.12
-    @State private var tps: [Double] = [12.4, 15.6, 14.2, 18.9, 16.5, 20.1, 19.8]
+    @ObservedObject var resourceManager = ResourceManager.shared
+    @State private var tps: [Double] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
     
     @ObservedObject var theme = ThemeManager.shared
     
@@ -15,8 +14,8 @@ struct ResourceMonitorView: View {
                     .foregroundColor(theme.onSurface)
                 
                 HStack(spacing: 24) {
-                    ResourceGauge(label: "RAM", value: ramUsage, color: theme.primary)
-                    ResourceGauge(label: "GPU", value: gpuUsage, color: theme.electricIndigo)
+                    ResourceGauge(label: "RAM", value: resourceManager.ramUsage, color: theme.primary)
+                    ResourceGauge(label: "CPU", value: resourceManager.cpuUsage, color: theme.electricIndigo)
                 }
                 
                 VStack(alignment: .leading, spacing: 16) {
@@ -37,12 +36,10 @@ struct ResourceMonitorView: View {
                         .foregroundColor(theme.onSurface)
                     
                     HStack {
-                        Text("Cool")
-                            .font(theme.appFont(size: 16))
-                            .foregroundColor(theme.primary)
+                        thermalStatusView
                         Spacer()
-                        Image(systemName: "thermometer.snowflake")
-                            .foregroundColor(theme.primary)
+                        Image(systemName: "thermometer.medium")
+                            .foregroundColor(thermalColor)
                     }
                 }
                 .padding(24)
@@ -52,6 +49,30 @@ struct ResourceMonitorView: View {
             .padding()
         }
         .background(theme.surface.ignoresSafeArea())
+    }
+    
+    private var thermalStatusView: some View {
+        let status: String
+        switch resourceManager.thermalState {
+        case .nominal: status = "Nominal (Good)"
+        case .fair: status = "Fair (Warm)"
+        case .serious: status = "Serious (Hot)"
+        case .critical: status = "Critical (Throttling)"
+        @unknown default: status = "Unknown"
+        }
+        return Text(status)
+            .font(theme.appFont(size: 16))
+            .foregroundColor(thermalColor)
+    }
+    
+    private var thermalColor: Color {
+        switch resourceManager.thermalState {
+        case .nominal: return theme.primary
+        case .fair: return .yellow
+        case .serious: return .orange
+        case .critical: return .red
+        @unknown default: return theme.onSurface
+        }
     }
 }
 

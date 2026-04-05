@@ -37,5 +37,10 @@ struct MainTabView: View {
                 }
         }
         .accentColor(theme.primary)
+        .onAppear {
+            Task {
+                await AIManager.shared.listLocalModels()
+            }
+        }
     }
 }

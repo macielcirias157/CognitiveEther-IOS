@@ -56,17 +56,30 @@ struct SettingsView: View {
                             SecureSetting(label: "Gemini API Key", value: $config.geminiKey)
                             
                             HStack {
-                                Text("Ollama Local Endpoint")
-                                    .font(theme.appFont(size: 16))
-                                    .foregroundColor(theme.onSurface.opacity(0.8))
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("Ollama Local Endpoint")
+                                        .font(theme.appFont(size: 16))
+                                        .foregroundColor(theme.onSurface.opacity(0.8))
+                                    Text("Use your PC IP (e.g. 192.168.x.x) if running on PC")
+                                        .font(theme.appFont(size: 10))
+                                        .foregroundColor(theme.onSurface.opacity(0.4))
+                                }
                                 Spacer()
-                                TextField("http://localhost:11434", text: $config.ollamaEndpoint)
+                                TextField("http://192.168.1.x:11434", text: $config.ollamaEndpoint)
                                     .font(theme.appFont(size: 14))
                                     .foregroundColor(theme.primary)
                                     .multilineTextAlignment(.trailing)
                             }
                             
                             ToggleSetting(label: "Enable Ollama Local", isOn: $config.isOllamaEnabled)
+                            
+                            if config.isOllamaEnabled {
+                                LuminaButton(label: "Refresh Local Models", action: {
+                                    Task {
+                                        await AIManager.shared.listLocalModels()
+                                    }
+                                }, isPrimary: false)
+                            }
                         }
                     }
                     
@@ -82,9 +95,6 @@ struct SettingsView: View {
             .padding()
         }
         .background(theme.surface.ignoresSafeArea())
-        .onDisappear {
-            config.save()
-        }
     }
 }
 

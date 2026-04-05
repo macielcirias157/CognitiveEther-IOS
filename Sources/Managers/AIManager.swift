@@ -25,6 +25,54 @@ class AIManager: ObservableObject {
     
     @Published var lastResponse: String = ""
     @Published var isRequesting: Bool = false
+    @Published var localModels: [OllamaModel] = []
+    
+    func listLocalModels() async {
+        guard config.isOllamaEnabled else { return }
+        let url = URL(string: "\(config.ollamaEndpoint)/api/tags")!
+        
+        do {
+            let (data, _) = try await URLSession.shared.data(from: url)
+            let response = try JSONDecoder().decode(OllamaTagsResponse.self, from: data)
+            await MainActor.run {
+                self.localModels = response.models
+            }
+        } catch {
+            print("Error listing Ollama models: \(error)")
+        }
+    }
+    
+    func pullModel(name: String) async throws {
+        let url = URL(string: "\(config.ollamaEndpoint)/api/pull")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body: [String: Any] = ["name": name, "stream": false]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+            throw NSError(domain: "OllamaError", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to pull model"])
+        }
+        await listLocalModels()
+    }
+    
+    func deleteModel(name: String) async throws {
+        let url = URL(string: "\(config.ollamaEndpoint)/api/delete")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        
+        let body: [String: Any] = ["name": name]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse, (200...299).contains(httpResponse.statusCode) else {
+            throw NSError(domain: "OllamaError", code: 2, userInfo: [NSLocalizedDescriptionKey: "Failed to delete model"])
+        }
+        await listLocalModels()
+    }
     
     func generateResponse(prompt: String, provider: AIProvider, model: String) async throws -> String {
         switch provider {
@@ -125,6 +173,23 @@ class AIManager: ObservableObject {
 }
 
 // Models for decoding
+struct OllamaTagsResponse: Codable {
+    let models: [OllamaModel]
+}
+
+struct OllamaModel: Codable, Identifiable {
+    var id: String { name }
+    let name: String
+    let size: Int64
+    let details: ModelDetails
+}
+
+struct ModelDetails: Codable {
+    let format: String
+    let family: String
+    let parameter_size: String
+}
+
 struct OllamaResponse: Codable {
     let response: String
 }

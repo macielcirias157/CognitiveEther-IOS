@@ -34,19 +34,45 @@ class ChatViewModel: ObservableObject {
     private func callAI(prompt: String) {
         let config = ConfigManager.shared
         
-        // Determine provider and model (this can be made dynamic later)
-        let provider: AIProvider = config.isOllamaEnabled ? .ollama : .openAI
-        let model: String = config.isOllamaEnabled ? "llama3" : "gpt-4o"
+        // Determine provider and model
+        let provider: AIProvider
+        let model: String
         
-        // Add a reasoning message
-        var reasoningContent = "Connecting to \(config.isOllamaEnabled ? "Ollama Local" : "Cloud API")..."
-        
-        if config.isSemanticMemoryEnabled {
-            reasoningContent += "\n- Semantic Memory active: Searching for relevant context..."
+        if config.isOllamaEnabled {
+            provider = .ollama
+            // Use the first local model if available, otherwise default to llama3
+            model = AIManager.shared.localModels.first?.name ?? "llama3"
+        } else if !config.openAIKey.isEmpty {
+            provider = .openAI
+            model = "gpt-4o"
+        } else if !config.deepSeekKey.isEmpty {
+            provider = .deepSeek
+            model = "deepseek-chat"
+        } else if !config.geminiKey.isEmpty {
+            provider = .gemini
+            model = "gemini-1.5-flash"
+        } else {
+            // No provider configured
+            self.messages.removeAll(where: { $0.role == .reasoning })
+            let errorMsg = Message(
+                content: "No AI provider configured. Please enable Ollama or add an API Key in Settings.",
+                role: .assistant,
+                timestamp: Date()
+            )
+            self.messages.append(errorMsg)
+            self.isProcessing = false
+            return
         }
         
-        if config.isWebBrowsingEnabled && prompt.lowercased().contains("http") {
-            reasoningContent += "\n- Web Browser active: Extracting content from link..."
+        // Add a reasoning message
+        var reasoningContent = "Connecting to \(provider.rawValue.capitalized)..."
+        if provider == .ollama {
+            reasoningContent += "\n- Using local endpoint: \(config.ollamaEndpoint)"
+            reasoningContent += "\n- Target model: \(model)"
+        }
+        
+        if config.isSemanticMemoryEnabled {
+            reasoningContent += "\n- Semantic Memory: Active"
         }
         
         let reasoningMessage = Message(
@@ -78,8 +104,14 @@ class ChatViewModel: ObservableObject {
             } catch {
                 await MainActor.run {
                     self.messages.removeAll(where: { $0.role == .reasoning })
+                    let errorContent: String
+                    if (error as NSError).domain == NSURLErrorDomain {
+                        errorContent = "Connection Error: Could not reach \(provider.rawValue). Check your network or local server status."
+                    } else {
+                        errorContent = "Error: \(error.localizedDescription)"
+                    }
                     let errorMessage = Message(
-                        content: "Error: \(error.localizedDescription)",
+                        content: errorContent,
                         role: .assistant,
                         timestamp: Date()
                     )

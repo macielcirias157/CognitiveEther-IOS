@@ -1,12 +1,9 @@
 import SwiftUI
 
 struct ModelExplorerView: View {
-    @State private var models: [AIModel] = [
-        AIModel(name: "Llama 3 8B", description: "Meta's latest powerful LLM.", size: "4.7 GB", type: "General"),
-        AIModel(name: "Phi-3 Mini", description: "Microsoft's lightweight and fast model.", size: "2.3 GB", type: "Lightweight"),
-        AIModel(name: "Gemma 7B", description: "Google's versatile open model.", size: "4.2 GB", type: "Coding"),
-        AIModel(name: "Moondream 2", description: "Small and efficient vision model.", size: "1.6 GB", type: "Vision")
-    ]
+    @ObservedObject var aiManager = AIManager.shared
+    @ObservedObject var theme = ThemeManager.shared
+    @ObservedObject var config = ConfigManager.shared
     
     @State private var remoteModels: [AIModel] = [
         AIModel(name: "DeepSeek-V3", description: "Remote model via API.", size: "N/A", type: "API"),
@@ -14,8 +11,8 @@ struct ModelExplorerView: View {
         AIModel(name: "Gemini 1.5 Pro", description: "Google's multimodal model.", size: "N/A", type: "API")
     ]
     
-    @ObservedObject var theme = ThemeManager.shared
-    @ObservedObject var config = ConfigManager.shared
+    @State private var isPulling = false
+    @State private var pullError: String?
     
     var body: some View {
         ScrollView {
@@ -25,28 +22,34 @@ struct ModelExplorerView: View {
                     .foregroundColor(theme.onSurface)
                 
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("Local Models")
+                    Text("Ollama Local Models")
                         .font(theme.appFont(size: 20, weight: .semibold))
                         .foregroundColor(theme.onSurface)
                     
-                    ForEach($models) { $model in
-                        ModelCard(model: $model)
+                    if config.isOllamaEnabled {
+                        if aiManager.localModels.isEmpty {
+                            Text("No local models found. Make sure Ollama is running.")
+                                .font(theme.appFont(size: 14))
+                                .foregroundColor(theme.onSurface.opacity(0.6))
+                        } else {
+                            ForEach(aiManager.localModels) { ollamaModel in
+                                LocalModelCard(model: ollamaModel)
+                            }
+                        }
+                    } else {
+                        Text("Enable Ollama in Settings to see local models.")
+                            .font(theme.appFont(size: 14))
+                            .foregroundColor(theme.onSurface.opacity(0.6))
                     }
                 }
                 
-                if config.isOllamaEnabled {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Ollama Local Hub")
-                            .font(theme.appFont(size: 20, weight: .semibold))
-                            .foregroundColor(theme.onSurface)
-                        
-                        Text("Connected to \(config.ollamaEndpoint)")
-                            .font(theme.appFont(size: 12))
-                            .foregroundColor(theme.primary)
-                        
-                        // Mock Ollama models
-                        ModelCard(model: .constant(AIModel(name: "Mistral 7B", description: "Running on local Ollama.", size: "4.1 GB", type: "Ollama", isDownloaded: true)))
-                    }
+                VStack(alignment: .leading, spacing: 16) {
+                    Text("Recommended for Download")
+                        .font(theme.appFont(size: 20, weight: .semibold))
+                        .foregroundColor(theme.onSurface)
+                    
+                    DownloadCard(name: "llama3", description: "Meta's latest 8B model.", size: "4.7 GB")
+                    DownloadCard(name: "phi3", description: "Microsoft's efficient mini model.", size: "2.3 GB")
                 }
                 
                 VStack(alignment: .leading, spacing: 16) {
@@ -58,26 +61,100 @@ struct ModelExplorerView: View {
                         ModelCard(model: $model)
                     }
                 }
-                
-                if !config.huggingFaceToken.isEmpty {
-                    VStack(alignment: .leading, spacing: 16) {
-                        Text("Hugging Face Hub")
-                            .font(theme.appFont(size: 20, weight: .semibold))
-                            .foregroundColor(theme.onSurface)
-                        
-                        Text("Search and download from HF community.")
-                            .font(theme.appFont(size: 14))
-                            .foregroundColor(theme.onSurface.opacity(0.6))
-                        
-                        LuminaButton(label: "Browse Hugging Face", action: {
-                            // Browse HF action
-                        }, isPrimary: false)
-                    }
-                }
             }
             .padding()
         }
         .background(theme.surface.ignoresSafeArea())
+        .onAppear {
+            Task {
+                await aiManager.listLocalModels()
+            }
+        }
+    }
+}
+
+struct LocalModelCard: View {
+    let model: OllamaModel
+    @ObservedObject var aiManager = AIManager.shared
+    @ObservedObject var theme = ThemeManager.shared
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(model.name)
+                        .font(theme.appFont(size: 18, weight: .semibold))
+                        .foregroundColor(theme.onSurface)
+                    Text("\(model.details.parameter_size) • \(formatSize(model.size))")
+                        .font(theme.appFont(size: 12))
+                        .foregroundColor(theme.primary)
+                }
+                Spacer()
+                Button(action: {
+                    Task {
+                        try? await aiManager.deleteModel(name: model.name)
+                    }
+                }) {
+                    Image(systemName: "trash")
+                        .foregroundColor(.red.opacity(0.7))
+                }
+            }
+        }
+        .padding()
+        .background(theme.surfaceContainer)
+        .cornerRadius(20)
+    }
+    
+    private func formatSize(_ bytes: Int64) -> String {
+        let formatter = ByteCountFormatter()
+        formatter.allowedUnits = [.useGB, .useMB]
+        formatter.countStyle = .file
+        return formatter.string(fromByteCount: bytes)
+    }
+}
+
+struct DownloadCard: View {
+    let name: String
+    let description: String
+    let size: String
+    @ObservedObject var aiManager = AIManager.shared
+    @ObservedObject var theme = ThemeManager.shared
+    @State private var isDownloading = false
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(name)
+                    .font(theme.appFont(size: 18, weight: .semibold))
+                    .foregroundColor(theme.onSurface)
+                Text("\(description) • \(size)")
+                    .font(theme.appFont(size: 14))
+                    .foregroundColor(theme.onSurface.opacity(0.6))
+            }
+            Spacer()
+            if isDownloading {
+                ProgressView()
+                    .progressViewStyle(CircularProgressViewStyle(tint: theme.primary))
+            } else {
+                Button(action: {
+                    isDownloading = true
+                    Task {
+                        do {
+                            try await aiManager.pullModel(name: name)
+                        } catch {
+                            print("Failed to pull: \(error)")
+                        }
+                        isDownloading = false
+                    }
+                }) {
+                    Image(systemName: "icloud.and.arrow.down")
+                        .foregroundColor(theme.primary)
+                }
+            }
+        }
+        .padding()
+        .background(theme.surfaceContainer)
+        .cornerRadius(20)
     }
 }
 

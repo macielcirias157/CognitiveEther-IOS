@@ -5,25 +5,25 @@ class ConfigManager: ObservableObject {
     static let shared = ConfigManager()
     
     // Ollama Config
-    @Published var ollamaEndpoint: String = "http://localhost:11434"
-    @Published var isOllamaEnabled: Bool = false
+    @Published var ollamaEndpoint: String = "http://localhost:11434" { didSet { save() } }
+    @Published var isOllamaEnabled: Bool = false { didSet { save() } }
     
     // API Keys
-    @Published var huggingFaceToken: String = ""
-    @Published var openAIKey: String = ""
-    @Published var deepSeekKey: String = ""
-    @Published var geminiKey: String = ""
-    @Published var anthropicKey: String = ""
+    @Published var huggingFaceToken: String = "" { didSet { save() } }
+    @Published var openAIKey: String = "" { didSet { save() } }
+    @Published var deepSeekKey: String = "" { didSet { save() } }
+    @Published var geminiKey: String = "" { didSet { save() } }
+    @Published var anthropicKey: String = "" { didSet { save() } }
     
     // Remote Models visibility
-    @Published var showHFModels: Bool = false
+    @Published var showHFModels: Bool = false { didSet { save() } }
     
     // AI Behavior
-    @Published var defaultSystemPrompt: String = "You are Cognitive Ether, a helpful local AI assistant."
+    @Published var defaultSystemPrompt: String = "You are Cognitive Ether, a helpful local AI assistant." { didSet { save() } }
     
     // Skills State
-    @Published var isSemanticMemoryEnabled: Bool = false
-    @Published var isWebBrowsingEnabled: Bool = false
+    @Published var isSemanticMemoryEnabled: Bool = false { didSet { save() } }
+    @Published var isWebBrowsingEnabled: Bool = false { didSet { save() } }
     
     private init() {
         // Load from UserDefaults or Keychain if needed
