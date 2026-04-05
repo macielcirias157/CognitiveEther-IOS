@@ -11,7 +11,7 @@ enum AIProvider: String, AppEnum {
     case gemini
     
     static var typeDisplayRepresentation: TypeDisplayRepresentation = "AI Provider"
-    static var caseDisplayRepresentations: [AIProvider: CaseDisplayRepresentation] = [
+    static var caseDisplayRepresentations: [AIProvider: DisplayRepresentation] = [
         .ollama: "Ollama",
         .openAI: "OpenAI",
         .deepSeek: "DeepSeek",
