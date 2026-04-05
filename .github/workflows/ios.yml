@@ -26,11 +26,21 @@ jobs:
           -scheme CognitiveEther \
           -sdk iphoneos \
           -configuration Release \
+          -arch arm64 \
           CODE_SIGNING_ALLOWED=NO \
           CODE_SIGNING_REQUIRED=NO \
           CODE_SIGN_IDENTITY="" \
           AD_HOC_CODE_SIGNING_ALLOWED=YES \
-          CONFIGURATION_BUILD_DIR=build/Release-iphoneos
+          ENTITLEMENTS_REQUIRED=NO \
+          IPHONEOS_DEPLOYMENT_TARGET=16.0 \
+          CONFIGURATION_BUILD_DIR=build/Release-iphoneos \
+          GENERATE_INFOPLIST_FILE=YES \
+          MARKETING_VERSION=1.0 \
+          CURRENT_PROJECT_VERSION=1 \
+          ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon \
+          OTHER_SWIFT_FLAGS="-Xfrontend -serialize-debugging-options" \
+          ENABLE_PREVIEWS=NO \
+          COMPILER_INDEX_STORE_ENABLE=NO
           
     - name: Create IPA
       run: |
