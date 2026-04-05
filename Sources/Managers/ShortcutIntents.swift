@@ -8,8 +8,8 @@ struct AskCognitiveEtherIntent: AppIntent {
     @Parameter(title: "Prompt", description: "The text to send to the AI")
     var prompt: String
 
-    @Parameter(title: "Provider", default: "Ollama")
-    var provider: String
+    @Parameter(title: "Provider", default: .ollama)
+    var provider: AIProvider
 
     @Parameter(title: "Model", default: "llama3")
     var model: String
@@ -19,16 +19,8 @@ struct AskCognitiveEtherIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ReturnsValue<String> {
-        let aiProvider: AIProvider
-        switch provider.lowercased() {
-        case "openai": aiProvider = .openAI
-        case "deepseek": aiProvider = .deepSeek
-        case "gemini": aiProvider = .gemini
-        default: aiProvider = .ollama
-        }
-        
         do {
-            let response = try await AIManager.shared.generateResponse(prompt: prompt, provider: aiProvider, model: model)
+            let response = try await AIManager.shared.generateResponse(prompt: prompt, provider: provider, model: model)
             return .result(value: response)
         } catch {
             return .result(value: "Error: \(error.localizedDescription)")
@@ -41,8 +33,8 @@ struct CognitiveEtherShortcuts: AppShortcutsProvider {
         AppShortcut(
             intent: AskCognitiveEtherIntent(),
             phrases: [
-                "Ask \(.applicationName) to \(\.$prompt)",
-                "Query \(.applicationName) with \(\.$prompt)"
+                "Ask \(.applicationName)",
+                "Query \(.applicationName)"
             ],
             shortTitle: "Ask AI",
             systemImageName: "sparkles"

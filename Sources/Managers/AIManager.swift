@@ -1,11 +1,20 @@
 import Foundation
 import Combine
+import AppIntents
 
-enum AIProvider {
+enum AIProvider: String, AppEnum {
     case ollama
     case openAI
     case deepSeek
     case gemini
+    
+    static var typeDisplayRepresentation: TypeDisplayRepresentation = "AI Provider"
+    static var caseDisplayRepresentations: [AIProvider: CaseDisplayRepresentation] = [
+        .ollama: "Ollama",
+        .openAI: "OpenAI",
+        .deepSeek: "DeepSeek",
+        .gemini: "Gemini"
+    ]
 }
 
 class AIManager: ObservableObject {
