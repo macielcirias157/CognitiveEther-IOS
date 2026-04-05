@@ -13,11 +13,11 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
-    - name: Install XcodeGen
-      run: brew install xcodegen
-    - name: Generate Project
-      run: xcodegen generate --spec project.yml
-      
+    - name: Setup Xcode
+      uses: maxim-lobanov/setup-xcode@v1
+      with:
+        xcode-version: '15.0'
+        
     - name: Build App
       run: |
         xcodebuild build \
@@ -37,7 +37,6 @@ jobs:
           MARKETING_VERSION=1.0 \
           CURRENT_PROJECT_VERSION=1 \
           ASSETCATALOG_COMPILER_APPICON_NAME=AppIcon \
-          OTHER_SWIFT_FLAGS="-Xfrontend -serialize-debugging-options" \
           ENABLE_PREVIEWS=NO \
           COMPILER_INDEX_STORE_ENABLE=NO
           
