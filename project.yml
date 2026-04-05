@@ -13,9 +13,10 @@ targets:
       base:
         INFOPLIST_FILE: Sources/Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: com.cognitive.ether
-        DEVELOPMENT_TEAM: "" # Set this in GitHub Secrets or leave for manual signing
+        DEVELOPMENT_TEAM: ""
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MARKETING_VERSION: 1.0.0
         CURRENT_PROJECT_VERSION: 1
-    dependencies:
-      # Add dependencies here
+        SWIFT_VERSION: "5.10"
+        TARGETED_DEVICE_FAMILY: "1,2"
+    dependencies: []
