@@ -1,6 +1,28 @@
 import Foundation
 import Combine
 
+enum AppLanguage: String, CaseIterable, Codable {
+    case english = "en"
+    case spanish = "es"
+    case portuguese = "pt"
+    
+    var displayName: String {
+        switch self {
+        case .english: return "English"
+        case .spanish: return "Español"
+        case .portuguese: return "Português"
+        }
+    }
+    
+    var nativeName: String {
+        switch self {
+        case .english: return "English"
+        case .spanish: return "Spanish"
+        case .portuguese: return "Portuguese"
+        }
+    }
+}
+
 final class ConfigManager: ObservableObject {
     static let shared = ConfigManager()
 
@@ -31,6 +53,16 @@ final class ConfigManager: ObservableObject {
     @Published var defaultSystemPrompt: String { didSet { saveDefaults() } }
     @Published var isSemanticMemoryEnabled: Bool { didSet { saveDefaults() } }
     @Published var isWebBrowsingEnabled: Bool { didSet { saveDefaults() } }
+    
+    // Web Search
+    @Published var searxngEndpoint: String { didSet { saveDefaults() } }
+    
+    // Language
+    @Published var appLanguageRawValue: String { didSet { saveDefaults() } }
+    
+    // Custom prompts
+    @Published var customPrompts: [CustomPrompt] { didSet { saveDefaults() } }
+    @Published var activeCustomPromptID: UUID? { didSet { saveDefaults() } }
 
     private let defaults: UserDefaults
     private let secureStorage: SecureStorage
@@ -59,6 +91,24 @@ final class ConfigManager: ObservableObject {
             ?? "You are Cognitive Ether, a pragmatic AI assistant. Give useful, direct answers and preserve context across the conversation."
         isSemanticMemoryEnabled = defaults.object(forKey: Keys.isSemanticMemoryEnabled) as? Bool ?? true
         isWebBrowsingEnabled = defaults.object(forKey: Keys.isWebBrowsingEnabled) as? Bool ?? false
+        
+        searxngEndpoint = defaults.string(forKey: Keys.searxngEndpoint) ?? ""
+        
+        appLanguageRawValue = defaults.string(forKey: Keys.appLanguageRawValue) ?? AppLanguage.english.rawValue
+        
+        if let promptsData = defaults.data(forKey: Keys.customPrompts),
+           let prompts = try? JSONDecoder().decode([CustomPrompt].self, from: promptsData) {
+            customPrompts = prompts
+        } else {
+            customPrompts = []
+        }
+        
+        if let activeIDData = defaults.data(forKey: Keys.activeCustomPromptID),
+           let activeID = try? JSONDecoder().decode(UUID?.self, from: activeIDData) {
+            activeCustomPromptID = activeID
+        } else {
+            activeCustomPromptID = nil
+        }
 
         huggingFaceToken = secureStorage.string(for: Keys.huggingFaceToken)
         openAIKey = secureStorage.string(for: Keys.openAIKey)
@@ -67,6 +117,11 @@ final class ConfigManager: ObservableObject {
         anthropicKey = secureStorage.string(for: Keys.anthropicKey)
 
         normalizeProviderSelection()
+    }
+    
+    var appLanguage: AppLanguage {
+        get { AppLanguage(rawValue: appLanguageRawValue) ?? .english }
+        set { appLanguageRawValue = newValue.rawValue }
     }
 
     var selectedProvider: AIProvider {
@@ -136,6 +191,37 @@ final class ConfigManager: ObservableObject {
 
     func resetPromptToDefault() {
         defaultSystemPrompt = "You are Cognitive Ether, a pragmatic AI assistant. Give useful, direct answers and preserve context across the conversation."
+        activeCustomPromptID = nil
+    }
+    
+    func addCustomPrompt(title: String, content: String) {
+        let prompt = CustomPrompt(title: title, content: content)
+        customPrompts.append(prompt)
+    }
+    
+    func removeCustomPrompt(id: UUID) {
+        customPrompts.removeAll { $0.id == id }
+        if activeCustomPromptID == id {
+            activeCustomPromptID = nil
+        }
+    }
+    
+    func useCustomPrompt(id: UUID) {
+        guard let prompt = customPrompts.first(where: { $0.id == id }) else { return }
+        defaultSystemPrompt = prompt.content
+        activeCustomPromptID = id
+    }
+    
+    func activeCustomPrompt() -> CustomPrompt? {
+        guard let id = activeCustomPromptID else { return nil }
+        return customPrompts.first { $0.id == id }
+    }
+    
+    func effectiveSystemPrompt() -> String {
+        if let active = activeCustomPrompt() {
+            return active.content
+        }
+        return defaultSystemPrompt
     }
 
     private func normalizeProviderSelection() {
@@ -162,11 +248,37 @@ final class ConfigManager: ObservableObject {
         defaults.set(defaultSystemPrompt, forKey: Keys.defaultSystemPrompt)
         defaults.set(isSemanticMemoryEnabled, forKey: Keys.isSemanticMemoryEnabled)
         defaults.set(isWebBrowsingEnabled, forKey: Keys.isWebBrowsingEnabled)
+        
+        defaults.set(searxngEndpoint, forKey: Keys.searxngEndpoint)
+        
+        defaults.set(appLanguageRawValue, forKey: Keys.appLanguageRawValue)
+        
+        if let promptsData = try? JSONEncoder().encode(customPrompts) {
+            defaults.set(promptsData, forKey: Keys.customPrompts)
+        }
+        
+        if let activeIDData = try? JSONEncoder().encode(activeCustomPromptID) {
+            defaults.set(activeIDData, forKey: Keys.activeCustomPromptID)
+        }
     }
 
     private func sanitizedModelName(_ value: String, fallback: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? fallback : trimmed
+    }
+}
+
+struct CustomPrompt: Identifiable, Codable, Equatable {
+    let id: UUID
+    var title: String
+    var content: String
+    let createdAt: Date
+    
+    init(id: UUID = UUID(), title: String, content: String, createdAt: Date = Date()) {
+        self.id = id
+        self.title = title
+        self.content = content
+        self.createdAt = createdAt
     }
 }
 
@@ -193,4 +305,9 @@ private enum Keys {
     static let defaultSystemPrompt = "defaultSystemPrompt"
     static let isSemanticMemoryEnabled = "isSemanticMemoryEnabled"
     static let isWebBrowsingEnabled = "isWebBrowsingEnabled"
+    
+    static let searxngEndpoint = "searxngEndpoint"
+    static let appLanguageRawValue = "appLanguageRawValue"
+    static let customPrompts = "customPrompts"
+    static let activeCustomPromptID = "activeCustomPromptID"
 }

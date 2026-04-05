@@ -250,14 +250,31 @@ final class AIManager: ObservableObject {
         history: [Message],
         provider: AIProvider,
         model: String,
-        memoryContext: String? = nil
+        memoryContext: String? = nil,
+        enableWebSearch: Bool = false,
+        originalQuery: String? = nil
     ) async throws -> AIResponsePayload {
         guard config.isConfigured(for: provider) else {
             throw AIServiceError.providerNotConfigured(provider)
         }
 
-        let conversationMessages = buildConversationMessages(from: history)
-        let systemPrompt = buildSystemPrompt(memoryContext: memoryContext)
+        var conversationMessages = buildConversationMessages(from: history)
+        var systemPrompt = buildSystemPrompt(memoryContext: memoryContext)
+        
+        if enableWebSearch, let query = originalQuery ?? history.last(where: { $0.role == .user })?.content {
+            let webContext = await WebSearchManager.shared.searchAndFormat(query: query)
+            systemPrompt = """
+            \(systemPrompt)
+            
+            ---
+            WEB SEARCH RESULTS:
+            \(webContext)
+            ---
+            
+            Use the web search results above to provide an informed response when relevant.
+            """
+        }
+        
         let startDate = Date()
 
         await MainActor.run {

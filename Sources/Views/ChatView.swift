@@ -4,9 +4,11 @@ import UIKit
 struct ChatView: View {
     @ObservedObject private var viewModel = ChatViewModel.shared
     @ObservedObject private var theme = ThemeManager.shared
+    @FocusState private var isInputFocused: Bool
 
     @State private var isShowingSettings = false
     @State private var isShowingHistory = false
+    @State private var showingMenu = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -14,6 +16,7 @@ struct ChatView: View {
                 title: viewModel.activeTitle,
                 subtitle: viewModel.activeProviderLabel,
                 isProcessing: viewModel.isProcessing,
+                onMenuToggle: { showingMenu = true },
                 onNewConversation: viewModel.createNewConversation,
                 onOpenHistory: { isShowingHistory = true },
                 onOpenSettings: { isShowingSettings = true }
@@ -32,19 +35,25 @@ struct ChatView: View {
                     }
                     .padding()
                 }
-                .onChange(of: viewModel.messages) { _ in
+                .onChange(of: viewModel.messages.count) { _ in
                     guard let lastID = viewModel.messages.last?.id else { return }
                     withAnimation(.easeOut(duration: 0.2)) {
                         proxy.scrollTo(lastID, anchor: .bottom)
                     }
+                }
+                .onTapGesture {
+                    hideKeyboard()
                 }
             }
 
             ChatComposer(
                 text: $viewModel.inputText,
                 isProcessing: viewModel.isProcessing,
-                onSubmit: viewModel.sendMessage
+                onSubmit: {
+                    viewModel.sendMessage()
+                }
             )
+            .focused($isInputFocused)
         }
         .background(theme.surface.ignoresSafeArea())
         .sheet(isPresented: $isShowingSettings) {
@@ -61,6 +70,22 @@ struct ChatView: View {
             }
             .presentationDetents([.medium, .large])
         }
+        .confirmationDialog("Actions", isPresented: $showingMenu) {
+            Button("New Conversation") {
+                viewModel.createNewConversation()
+            }
+            Button("History") {
+                isShowingHistory = true
+            }
+            Button("Settings") {
+                isShowingSettings = true
+            }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    private func hideKeyboard() {
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
     }
 }
 
@@ -68,6 +93,7 @@ private struct ChatHeader: View {
     let title: String
     let subtitle: String
     let isProcessing: Bool
+    let onMenuToggle: () -> Void
     let onNewConversation: () -> Void
     let onOpenHistory: () -> Void
     let onOpenSettings: () -> Void
@@ -77,6 +103,16 @@ private struct ChatHeader: View {
     var body: some View {
         VStack(spacing: 14) {
             HStack(alignment: .top) {
+                Button(action: onMenuToggle) {
+                    Image(systemName: "line.3.horizontal")
+                        .font(.system(size: 18, weight: .semibold))
+                        .foregroundColor(theme.onSurface)
+                        .frame(width: 44, height: 44)
+                        .background(theme.surfaceContainerLow)
+                        .clipShape(Circle())
+                }
+                .buttonStyle(.plain)
+
                 VStack(alignment: .leading, spacing: 6) {
                     Text(title)
                         .font(theme.appFont(size: 24, weight: .bold))
@@ -90,12 +126,6 @@ private struct ChatHeader: View {
                 }
 
                 Spacer()
-
-                HStack(spacing: 10) {
-                    HeaderIconButton(systemImage: "clock.arrow.circlepath", action: onOpenHistory)
-                    HeaderIconButton(systemImage: "square.and.pencil", action: onNewConversation)
-                    HeaderIconButton(systemImage: "gearshape", action: onOpenSettings)
-                }
             }
 
             if isProcessing {
@@ -149,28 +179,10 @@ private struct ChatComposer: View {
     }
 }
 
-private struct HeaderIconButton: View {
-    let systemImage: String
-    let action: () -> Void
-
-    @ObservedObject private var theme = ThemeManager.shared
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemImage)
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(theme.onSurface.opacity(0.75))
-                .frame(width: 40, height: 40)
-                .background(theme.surfaceContainerLow)
-                .clipShape(Circle())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
 struct MessageBubble: View {
     let message: Message
     @ObservedObject private var theme = ThemeManager.shared
+    @State private var isExpanded: Bool = true
 
     var body: some View {
         HStack {
@@ -178,7 +190,7 @@ struct MessageBubble: View {
 
             VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 8) {
                 if message.role == .reasoning {
-                    ReasoningAccord(content: message.content)
+                    ThinkingBlock(content: message.content, isExpanded: $isExpanded)
                 } else {
                     Text(message.content)
                         .font(theme.appFont(size: 16))
@@ -218,26 +230,103 @@ struct MessageBubble: View {
     }
 }
 
-struct ReasoningAccord: View {
+struct ThinkingBlock: View {
     let content: String
+    @Binding var isExpanded: Bool
     @ObservedObject private var theme = ThemeManager.shared
+    
+    @State private var currentSize: ThinkingSize = .medium
+
+    private var fontSize: CGFloat {
+        switch currentSize {
+        case .small: return 11
+        case .medium: return 13
+        case .large: return 15
+        }
+    }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            Rectangle()
-                .fill(theme.primary)
-                .frame(width: 2)
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: { withAnimation(.easeInOut(duration: 0.25)) { isExpanded.toggle() } }) {
+                HStack(spacing: 10) {
+                    Image(systemName: "brain.head.profile")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(theme.electricIndigo)
 
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Execution Context")
-                    .font(theme.appFont(size: 13, weight: .semibold))
-                    .foregroundColor(theme.onSurface.opacity(0.7))
+                    Text("Thinking")
+                        .font(theme.appFont(size: 14, weight: .semibold))
+                        .foregroundColor(theme.electricIndigo)
 
-                Text(content)
-                    .font(theme.appFont(size: 13))
-                    .foregroundColor(theme.onSurface.opacity(0.5))
+                    Spacer()
+
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(theme.onSurface.opacity(0.5))
+                    
+                    Menu {
+                        ForEach(ThinkingSize.allCases, id: \.self) { size in
+                            Button {
+                                currentSize = size
+                            } label: {
+                                HStack {
+                                    Text(size.label)
+                                    if currentSize == size {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "textformat.size")
+                            .font(.system(size: 14))
+                            .foregroundColor(theme.onSurface.opacity(0.5))
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                .background(theme.surfaceContainerHigh)
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded {
+                ScrollView {
+                    Text(content)
+                        .font(theme.appFont(size: fontSize))
+                        .foregroundColor(theme.onSurface.opacity(0.7))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(16)
+                }
+                .frame(maxHeight: currentSize.maxHeight)
+                .background(theme.surfaceContainer.opacity(0.5))
             }
         }
-        .padding(.vertical, 8)
+        .background(theme.surfaceContainer)
+        .cornerRadius(18)
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(theme.electricIndigo.opacity(0.3), lineWidth: 1)
+        )
+    }
+}
+
+enum ThinkingSize: String, CaseIterable {
+    case small
+    case medium
+    case large
+    
+    var label: String {
+        switch self {
+        case .small: return "Small"
+        case .medium: return "Medium"
+        case .large: return "Large"
+        }
+    }
+    
+    var maxHeight: CGFloat {
+        switch self {
+        case .small: return 80
+        case .medium: return 150
+        case .large: return 300
+        }
     }
 }

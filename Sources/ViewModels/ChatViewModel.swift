@@ -66,36 +66,42 @@ final class ChatViewModel: ObservableObject {
         store.appendMessage(userMessage, to: session.id)
         store.appendMessage(reasoningMessage, to: session.id)
 
+        let sessionID = session.id
+
         Task {
             do {
-                let history = store.messages(for: session.id)
+                let history = store.messages(for: sessionID)
                 let memoryContext = config.isSemanticMemoryEnabled
-                    ? store.recentMemoryContext(excluding: session.id)
+                    ? store.recentMemoryContext(excluding: sessionID)
                     : nil
 
                 let response = try await aiManager.generateResponse(
                     history: history,
                     provider: provider,
                     model: model,
-                    memoryContext: memoryContext
+                    memoryContext: memoryContext,
+                    enableWebSearch: config.isWebBrowsingEnabled,
+                    originalQuery: prompt
                 )
 
                 await MainActor.run {
-                    self.store.removeThinkingMessages(from: session.id)
+                    self.store.removeThinkingMessages(from: sessionID)
                     self.store.appendMessage(
                         Message(content: response.text, role: .assistant),
-                        to: session.id
+                        to: sessionID
                     )
                     self.isProcessing = false
+                    self.refreshMessages()
                 }
             } catch {
                 await MainActor.run {
-                    self.store.removeThinkingMessages(from: session.id)
+                    self.store.removeThinkingMessages(from: sessionID)
                     self.store.appendMessage(
                         Message(content: self.describe(error, provider: provider), role: .assistant),
-                        to: session.id
+                        to: sessionID
                     )
                     self.isProcessing = false
+                    self.refreshMessages()
                 }
             }
         }
@@ -122,7 +128,7 @@ final class ChatViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
-    private func refreshMessages() {
+    internal func refreshMessages() {
         messages = store.activeSession?.messages ?? []
     }
 
@@ -137,20 +143,29 @@ final class ChatViewModel: ObservableObject {
 
     private func makeReasoningMessage(provider: AIProvider, model: String) -> String {
         var lines = [
-            "Provider: \(provider.displayName)",
-            "Model: \(model)",
-            "Temperature: \(String(format: "%.2f", config.temperature))",
-            "Top-P: \(String(format: "%.2f", config.topP))",
-            "Context Window: \(config.contextWindow)"
+            "**Provider:** \(provider.displayName)",
+            "**Model:** \(model)",
+            "**Temperature:** \(String(format: "%.2f", config.temperature))",
+            "**Top-P:** \(String(format: "%.2f", config.topP))",
+            "**Context Window:** \(config.contextWindow) tokens",
+            ""
         ]
 
         if provider == .ollama {
-            lines.append("Endpoint: \(config.ollamaEndpoint)")
+            lines.append("**Endpoint:** `\(config.ollamaEndpoint)`")
         }
 
         if config.isSemanticMemoryEnabled {
-            lines.append("Cross-session memory: enabled")
+            lines.append("**Cross-session memory:** Enabled")
         }
+
+        if config.isWebBrowsingEnabled {
+            lines.append("**Web search:** Enabled")
+        }
+
+        lines.append("")
+        lines.append("---")
+        lines.append("*Preparing response...*")
 
         return lines.joined(separator: "\n")
     }

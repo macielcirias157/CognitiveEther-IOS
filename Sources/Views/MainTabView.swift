@@ -4,7 +4,6 @@ struct MainTabView: View {
     @ObservedObject var theme = ThemeManager.shared
     
     init() {
-        // Customize TabBar appearance
         UITabBar.appearance().backgroundColor = UIColor(theme.surface.opacity(0.8))
         UITabBar.appearance().unselectedItemTintColor = UIColor(theme.onSurface.opacity(0.4))
     }
@@ -13,27 +12,27 @@ struct MainTabView: View {
         TabView {
             ChatView()
                 .tabItem {
-                    Label("Chat", systemImage: "bubble.left.and.bubble.right")
+                    Label(Localization.chat, systemImage: "bubble.left.and.bubble.right")
                 }
             
             ModelExplorerView()
                 .tabItem {
-                    Label("Models", systemImage: "square.grid.2x2")
+                    Label(Localization.models, systemImage: "square.grid.2x2")
                 }
             
             ResourceMonitorView()
                 .tabItem {
-                    Label("Monitor", systemImage: "gauge")
+                    Label(Localization.monitor, systemImage: "gauge")
                 }
             
             MCPMarketplaceView()
                 .tabItem {
-                    Label("Tools", systemImage: "puzzlepiece")
+                    Label(Localization.tools, systemImage: "puzzlepiece")
                 }
             
             LabView()
                 .tabItem {
-                    Label("Prompts", systemImage: "flask")
+                    Label(Localization.prompts, systemImage: "flask")
                 }
         }
         .accentColor(theme.primary)
